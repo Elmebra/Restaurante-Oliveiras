@@ -56,6 +56,8 @@ export function createStore({ storage = defaultStorage(), now = () => Date.now()
   const clock = () => clockFn();
   const subs = new Set();
   let saveFailed = false;
+  const acked = new Map(); // chave -> carimbo vindo do servidor (não precisa reenviar)
+  const snap = new Map(); // chave -> JSON do último estado conhecido (sem o carimbo `u`)
   let state = load();
 
   function normalize(loaded) {
@@ -68,6 +70,10 @@ export function createStore({ storage = defaultStorage(), now = () => Date.now()
     out.cards = out.cards && typeof out.cards === 'object' ? out.cards : {};
     out.seq = { day: '', m: 0, pedido: 0, ...(out.seq || {}) };
     out.uid = Number.isInteger(out.uid) ? out.uid : 0;
+    out.tomb = out.tomb && typeof out.tomb === 'object' ? out.tomb : {};
+    out.meta = out.meta && typeof out.meta === 'object' ? out.meta : {};
+    out.sync = { rev: 0, pushedAt: 0, ...(out.sync || {}) };
+    out.dev = typeof out.dev === 'string' ? out.dev : '';
     return out;
   }
 
@@ -79,17 +85,123 @@ export function createStore({ storage = defaultStorage(), now = () => Date.now()
     return makeSeed();
   }
 
-  function save() {
+  function save(source = 'local') {
+    stamp(clock());
     try {
       storage.setItem(STORAGE_KEY, JSON.stringify(state));
       saveFailed = false;
     } catch {
       saveFailed = true;
     }
-    subs.forEach((fn) => fn(state));
+    subs.forEach((fn) => fn(state, source));
   }
 
-  const uid = (p) => `${p}${(++state.uid).toString(36)}`;
+  // IDs únicos por aparelho (dois aparelhos nunca geram o mesmo id).
+  const uid = (p) => {
+    if (!state.dev) state.dev = Math.random().toString(36).slice(2, 5);
+    return `${p}${state.dev}${(++state.uid).toString(36)}`;
+  };
+
+  // ---------------------------------------------------------------- sincronização (registro a registro)
+  const COLLS = ['pedidos', 'ledger', 'products', 'motoboys'];
+  const SINGLES = () => ['prices', 'seq', ...DAYS.map((d) => `menu:${d}`)];
+  const recJSON = (rec) => { const { u, ...r } = rec; return JSON.stringify(r); };
+  const singleVal = (k) => (k === 'prices' ? state.prices : k === 'seq' ? state.seq : state.menu[k.slice(5)]);
+
+  function initSnap() {
+    snap.clear();
+    for (const k of SINGLES()) snap.set(k, JSON.stringify(singleVal(k)));
+    for (const c of COLLS) for (const r of state[c]) if (r.u !== undefined) snap.set(`${c}:${r.id}`, recJSON(r));
+    for (const [n, r] of Object.entries(state.cards)) if (r.u !== undefined) snap.set(`cards:${n}`, recJSON(r));
+  }
+
+  /** Carimba o que mudou desde o último estado conhecido e registra o que foi apagado. */
+  function stamp(t) {
+    const seen = new Set();
+    const check = (key, rec) => {
+      seen.add(key);
+      const j = recJSON(rec);
+      if (snap.get(key) !== j) { rec.u = t; snap.set(key, j); delete state.tomb[key]; }
+    };
+    for (const c of COLLS) for (const r of state[c]) check(`${c}:${r.id}`, r);
+    for (const [n, r] of Object.entries(state.cards)) check(`cards:${n}`, r);
+    for (const k of [...snap.keys()]) {
+      if (SINGLES().includes(k)) {
+        const j = JSON.stringify(singleVal(k));
+        if (snap.get(k) !== j) { snap.set(k, j); state.meta[k] = t; }
+      } else if (!seen.has(k)) { snap.delete(k); state.tomb[k] = t; }
+    }
+  }
+
+  const localU = (k) => {
+    if (SINGLES().includes(k)) return state.meta[k] || 0;
+    const [c, id] = [k.slice(0, k.indexOf(':')), k.slice(k.indexOf(':') + 1)];
+    const rec = c === 'cards' ? state.cards[id] : state[c]?.find((r) => r.id === id);
+    return rec ? rec.u || 0 : state.tomb[k] || 0;
+  };
+
+  /** Alterações locais ainda não enviadas. Na 1ª sincronização, envia tudo. */
+  function syncCollect() {
+    stamp(clock());
+    const pa = state.sync.pushedAt;
+    const first = pa === 0;
+    const changes = [];
+    let maxU = 0;
+    const add = (k, u, del, v) => { if (acked.get(k) === u) return; changes.push({ k, u, del, v }); maxU = Math.max(maxU, u); };
+    for (const c of COLLS) for (const r of state[c]) if (first || r.u > pa) add(`${c}:${r.id}`, r.u, false, r);
+    for (const [n, r] of Object.entries(state.cards)) if (first || r.u > pa) add(`cards:${n}`, r.u, false, r);
+    for (const k of SINGLES()) { const u = state.meta[k] || 0; if (first || u > pa) add(k, u, false, singleVal(k)); }
+    for (const [k, u] of Object.entries(state.tomb)) if (first || u > pa) add(k, u, true, null);
+    return { changes, maxU: Math.max(maxU, 1) };
+  }
+
+  function syncPending() {
+    stamp(clock());
+    const pa = state.sync.pushedAt;
+    let n = 0;
+    const cnt = (k, u) => { if (u > pa && acked.get(k) !== u) n += 1; };
+    for (const c of COLLS) for (const r of state[c]) cnt(`${c}:${r.id}`, r.u);
+    for (const [num, r] of Object.entries(state.cards)) cnt(`cards:${num}`, r.u);
+    for (const k of SINGLES()) cnt(k, state.meta[k] || 0);
+    for (const [k, u] of Object.entries(state.tomb)) cnt(k, u);
+    return n;
+  }
+
+  /** Aplica o que veio do servidor (mais novo vence) e guarda até onde já sincronizou. */
+  function syncApply(changes, rev, pushedAt) {
+    stamp(clock());
+    let applied = 0;
+    for (const ch of changes) {
+      const { k, u, del, v } = ch;
+      if (localU(k) >= u) continue;
+      applied += 1;
+      acked.set(k, u);
+      if (SINGLES().includes(k)) {
+        if (k === 'prices') state.prices = v;
+        else if (k === 'seq') {
+          const me = state.seq;
+          state.seq = me.day === v.day ? { day: v.day, m: Math.max(me.m, v.m), pedido: Math.max(me.pedido, v.pedido) } : (v.day > me.day ? v : me);
+        } else state.menu[k.slice(5)] = v;
+        state.meta[k] = u;
+        snap.set(k, JSON.stringify(singleVal(k)));
+        continue;
+      }
+      const c = k.slice(0, k.indexOf(':'));
+      const id = k.slice(k.indexOf(':') + 1);
+      if (c === 'cards') {
+        if (del) delete state.cards[id]; else state.cards[id] = { ...v, u };
+      } else {
+        const arr = state[c];
+        const i = arr.findIndex((r) => r.id === id);
+        if (del) { if (i >= 0) arr.splice(i, 1); } else if (i >= 0) arr[i] = { ...v, u }; else arr.push({ ...v, u });
+      }
+      if (del) { state.tomb[k] = u; snap.delete(k); } else { delete state.tomb[k]; snap.set(k, recJSON({ ...v })); }
+    }
+    state.sync.rev = Math.max(state.sync.rev, rev || 0);
+    if (pushedAt) state.sync.pushedAt = Math.max(state.sync.pushedAt, pushedAt);
+    save('remote');
+    return applied;
+  }
 
   function rollDay() {
     const k = dateKey(clock());
@@ -302,14 +414,66 @@ export function createStore({ storage = defaultStorage(), now = () => Date.now()
     return ok({ total: cardTotal(card) });
   }
 
+  /** Pratos servidos no restaurante (prato feito, prato feijoada, feijoada separada) lançados na comanda. */
+  const SALAO = {
+    feito: { kind: 'prato', tipo: 'feito' },
+    feijoada: { kind: 'prato', tipo: 'feijoada' },
+    sepM: { kind: 'feijoada', modo: 'separada', size: 'M' },
+    sepG: { kind: 'feijoada', modo: 'separada', size: 'G' },
+  };
+  const salaoItem = (key) => SALAO[key];
+
+  function addCardDishes(num, items) {
+    const n = checkCard(num);
+    if (n === null) return fail('Cartão inválido');
+    const built = [];
+    for (const it of items || []) {
+      const qty = Number(it.qty);
+      if (!(qty > 0)) continue;
+      const base = SALAO[it.key];
+      if (!base) return fail('Prato inválido');
+      let unit;
+      try { unit = itemPrice(state.prices, base); } catch (e) { return fail(e.message); }
+      const label = itemLabel(base);
+      built.push({ id: uid('s'), ts: clock(), type: 'prato', name: label, qty, unit, amount: unit * qty, cat: itemCategory(base), status: 'preparo' });
+    }
+    if (!built.length) return fail('Escolha pelo menos um prato');
+    const card = state.cards[n] || (state.cards[n] = { num: n, openedAt: clock(), lines: [] });
+    card.lines.push(...built);
+    save();
+    return ok({ total: cardTotal(card), lines: built });
+  }
+
+  function setSalaoReady(num, lineId, ready) {
+    const line = state.cards[num]?.lines.find((l) => l.id === lineId && l.type === 'prato');
+    if (!line) return fail('Prato não encontrado');
+    line.status = ready ? 'pronto' : 'preparo';
+    save();
+    return ok();
+  }
+
+  /** Pratos do salão aguardando a cozinha, do mais antigo ao mais novo. */
+  function filaSalao() {
+    const out = [];
+    for (const c of Object.values(state.cards)) {
+      for (const l of c.lines) if (l.type === 'prato' && l.status !== 'pronto') out.push({ num: c.num, line: l });
+    }
+    return out.sort((a, b) => a.line.ts - b.line.ts);
+  }
+
   function closeCard(num, pagamento) {
     const card = state.cards[num];
     if (!card) return fail('Cartão não está em uso');
     if (!PAGAMENTOS[pagamento]) return fail('Escolha a forma de pagamento');
     const pesoTotal = sum(card.lines.filter((l) => l.type === 'peso'), (l) => l.amount);
     const itemTotal = sum(card.lines.filter((l) => l.type === 'item'), (l) => l.amount);
-    const total = pesoTotal + itemTotal;
+    const pratos = card.lines.filter((l) => l.type === 'prato');
+    const total = pesoTotal + itemTotal + sum(pratos, (l) => l.amount);
     ledgerAdd('pesagem', `Cartão ${num} · pesagem`, pesoTotal, pagamento, `c${num}`);
+    for (const cat of ['pratos', 'marmitex']) {
+      const ls = pratos.filter((l) => l.cat === cat);
+      ledgerAdd(cat, `Cartão ${num} · ${ls.map((l) => `${l.qty}x ${l.name}`).join(', ')}`, sum(ls, (l) => l.amount), pagamento, `c${num}`);
+    }
     ledgerAdd('bebidas', `Cartão ${num} · bebidas/doces`, itemTotal, pagamento, `c${num}`);
     delete state.cards[num];
     save();
@@ -350,6 +514,7 @@ export function createStore({ storage = defaultStorage(), now = () => Date.now()
       bebidas = r.lines.map(({ productId, name, qty, unit, amount }) => ({ productId, name, qty, unit, amount }));
     }
 
+    if (itens.some((it) => it.kind === 'prato')) return fail('Prato feito e prato feijoada são só no restaurante: lance na comanda (cartão)');
     rollDay();
     const built = [];
     try {
@@ -399,9 +564,7 @@ export function createStore({ storage = defaultStorage(), now = () => Date.now()
 
     const ref = pedido.id;
     const tag = `Pedido #${pedido.num} · ${cliente}`;
-    for (const cat of ['marmitex', 'pratos']) {
-      ledgerAdd(cat, tag, sum(pedido.itens.filter((i) => itemCategory(i) === cat), (i) => i.price), pedido.pagamento, ref);
-    }
+    ledgerAdd('marmitex', tag, sum(pedido.itens, (i) => i.price), pedido.pagamento, ref);
     ledgerAdd('bebidas', `${tag} · bebidas`, sum(bebidas, (b) => b.amount), pedido.pagamento, ref);
     ledgerAdd('taxa', `${tag} · taxa de entrega`, taxa, pedido.pagamento, ref);
 
@@ -589,7 +752,9 @@ export function createStore({ storage = defaultStorage(), now = () => Date.now()
     if (!data || typeof data !== 'object' || !data.prices || !data.menu || !Array.isArray(data.ledger)) {
       return fail('Este arquivo não é um backup do Oliveira\'s');
     }
+    const keep = { sync: state.sync, dev: state.dev };
     state = normalize(data);
+    state.sync = keep.sync; state.dev = keep.dev || state.dev;
     save();
     return ok();
   }
@@ -605,15 +770,21 @@ export function createStore({ storage = defaultStorage(), now = () => Date.now()
   }
 
   function resetAll() {
+    const keep = { sync: state.sync, dev: state.dev };
     state = makeSeed();
+    state.sync = keep.sync; state.dev = keep.dev;
     save();
     return ok();
   }
 
   function reload() {
     state = load();
-    subs.forEach((fn) => fn(state));
+    initSnap();
+    subs.forEach((fn) => fn(state, 'remote'));
   }
+
+  initSnap();
+  stamp(clock());
 
   return {
     get state() { return state; },
@@ -632,7 +803,7 @@ export function createStore({ storage = defaultStorage(), now = () => Date.now()
     // motoboys
     addMotoboy, removeMotoboy,
     // salão
-    launchWeighing, undoLine, addCardItems, closeCard, sellQuick, cardTotal,
+    launchWeighing, undoLine, addCardItems, addCardDishes, setSalaoReady, filaSalao, salaoItem, closeCard, sellQuick, cardTotal,
     // pedidos
     createPedido, setItemReady, setPixOk, dispatch, undoDispatch, markDelivered, undoDelivered,
     markPickedUp, undoPickedUp, cancelPedido, pedidoReady, pedidoTotal, pixBlocked,
@@ -640,5 +811,8 @@ export function createStore({ storage = defaultStorage(), now = () => Date.now()
     filaCozinha, pedidosAbertos, finalizadosHoje, summary, ledgerCSV,
     // dados
     exportJSON, importJSON, resetOperational, resetAll, reload,
+    // sincronização
+    syncCollect, syncApply, syncPending,
+    get syncState() { return state.sync; },
   };
 }

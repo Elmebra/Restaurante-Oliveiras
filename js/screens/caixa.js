@@ -29,7 +29,7 @@ function cardView({ store, s, ui, params }) {
   const c = s.cards[n];
   if (!c) return { kicker: 'CAIXA', title: `Cartão ${n}`, back: true, body: '<div class="empty">Este cartão não está em uso (já foi pago ou nunca foi lançado).</div>' };
   const total = store.cardTotal(c);
-  const lines = c.lines.map((l) => `<div class="line"><div class="grow"><b>${l.type === 'peso' ? `Pesagem ${fmtKg(l.kg)} kg` : `${l.qty}x ${esc(l.name)}`}</b><div class="muted">${timeHM(l.ts)}</div></div>
+  const lines = c.lines.map((l) => `<div class="line"><div class="grow"><b>${l.type === 'peso' ? `Pesagem ${fmtKg(l.kg)} kg` : `${l.qty}x ${esc(l.name)}`}</b><div class="muted">${timeHM(l.ts)}${l.type === 'prato' ? (l.status === 'pronto' ? ' · pronto' : ' · na cozinha') : ''}</div></div>
     <div class="row"><b>${money(l.amount)}</b><button class="iconbtn danger" data-action="rmLine" data-l="${l.id}" aria-label="Remover lançamento">${icons.x}</button></div></div>`).join('');
   const dinheiro = ui.pag === 'dinheiro';
   const recebido = parseMoney(ui.recebido);
@@ -44,7 +44,8 @@ function cardView({ store, s, ui, params }) {
   return {
     kicker: 'CAIXA', title: `Cartão ${n}`, back: true,
     body: `<div class="card">${lines}<div class="between mt12"><span class="strong">Total</span><b style="font:700 24px var(--font-title);color:var(--green)">${money(total)}</b></div></div>
-      <button class="btn block ghost" data-action="addItems" data-v="${n}">${icons.plus} Adicionar bebida/doce neste cartão</button>`,
+      <button class="btn block ghost mb8" data-action="addItems" data-v="${n}">${icons.plus} Adicionar bebida/doce neste cartão</button>
+      <button class="btn block ghost" data-action="addDishes" data-v="${n}">${icons.plus} Adicionar prato neste cartão</button>`,
     footer: `<button class="btn block" data-action="openPay">${icons.cash} Receber e devolver cartão</button>`,
     modal,
   };
@@ -90,6 +91,7 @@ export default {
     openCard({ go }, el) { go(`caixa/cartao/${el.dataset.v}`); return false; },
     venda({ go, ui }) { ui.cart = {}; ui.link = null; ui.pag = ''; ui.recebido = ''; go('caixa/venda'); return false; },
     addItems({ go, ui }, el) { ui.cart = {}; ui.link = Number(el.dataset.v); go('caixa/venda'); return false; },
+    addDishes({ go, uiOf }, el) { const b = uiOf('balanca'); b.mode = 'pratos'; b.card = Number(el.dataset.v); b.dishes = {}; go('balanca'); return false; },
     link({ ui }, el) { ui.link = el.dataset.v ? Number(el.dataset.v) : null; },
     inc({ ui }, el) { ui.cart[el.dataset.v] = (ui.cart[el.dataset.v] || 0) + 1; },
     dec({ ui }, el) { const q = (ui.cart[el.dataset.v] || 0) - 1; if (q > 0) ui.cart[el.dataset.v] = q; else delete ui.cart[el.dataset.v]; },

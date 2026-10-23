@@ -34,6 +34,10 @@ function queueView({ store, s, ui }) {
   const menuCard = `<div class="card flat"><div class="between"><div class="strong">Cardápio de hoje · ${DAY_NAMES[dia]}</div></div>
     ${m.dishes.length ? `<ul class="dishes mt8">${m.dishes.map((d) => `<li>• ${esc(d.name)}${d.tipo === 'feijoada' ? ' <span class="tag">feijoada</span>' : ''}</li>`).join('')}</ul>`
     : '<div class="muted mt8">Sem cardápio cadastrado para hoje (edite no Painel do Dono).</div>'}</div>`;
+  const salao = store.filaSalao();
+  const salaoHTML = salao.length ? `<div class="sec">Pratos do restaurante (${salao.length})</div><div class="card">${salao.map(({ num, line }) => `<div class="item" style="border-top:0;border-bottom:1px solid var(--sand-2)">
+      <span class="mid wait" title="Cartão">${num}</span><div class="grow"><div class="lab">${line.qty}x ${esc(line.name)}</div><div class="sub">Comanda ${num} · ${timeHM(line.ts)}</div></div>
+      <button class="btn xs" data-action="salaoReady" data-n="${num}" data-l="${line.id}">Pronto</button></div>`).join('')}</div>` : '';
   const cards = fila.map((p) => {
     const sub = p.tipo === 'entrega' ? `Entrega · ${esc(p.endereco)}` : 'Retirada no balcão';
     return `<div class="card">
@@ -50,7 +54,7 @@ function queueView({ store, s, ui }) {
   return {
     kicker: 'MODO COZINHA', title: 'Fila de montagem', back: true,
     right: `<button class="hbtn gold" data-action="novo" aria-label="Novo pedido">${icons.plus}</button>`,
-    body: `${menuCard}<div class="sec">Em preparo (${fila.length})</div>
+    body: `${menuCard}${salaoHTML}<div class="sec">Marmitex em preparo (${fila.length})</div>
       ${cards || '<div class="empty">Nenhum pedido em preparo.<br>Toque em + para lançar um pedido.</div>'}`,
     footer: `<button class="btn block" data-action="novo">${icons.plus} Novo pedido de marmitex</button>`,
     modal: ui.modal?.type === 'mids' ? midsModal(ui.modal.pedido) : '',
@@ -75,15 +79,13 @@ function formView({ store, s, ui, toast }) {
   const sizes = isFei ? sizesFor('feijoada') : sizesFor('marmitex');
 
   const days = `<div class="days">${WEEK_ORDER.map((k) => `<button class="${d.day === k ? 'on' : ''} ${store.todayKey() === k ? 'today' : ''}" data-action="day" data-v="${k}">${DAY_SHORT[k]}</button>`).join('')}</div>`;
-  const kinds = `<div class="seg c3">${[['marmitex', 'Marmitex'], ['pratofeito', 'Prato feito'], ['pratofeijoada', 'Prato feijoada']]
-    .map(([k, l]) => `<button class="chip ${cur.kind === k ? 'on' : ''}" data-action="kind" data-v="${k}">${l}<span class="sub">${k === 'marmitex' ? 'P · M · G' : money(s.prices.pratos[k === 'pratofeito' ? 'feito' : 'feijoada'])}</span></button>`).join('')}</div>`;
-  const dishes = needsDish(cur) ? (menu.dishes.length
+  const dishes = (menu.dishes.length
     ? menu.dishes.map((x) => `<button class="dish-pick ${cur.dish === x.name ? 'on' : ''}" data-action="dish" data-v="${esc(x.name)}"><span class="dot"></span><span class="grow">${esc(x.name)}</span>${x.tipo === 'feijoada' ? '<span class="tag">feijoada</span>' : ''}</button>`).join('')
-    : `<input class="inp" data-input="dishText" placeholder="Digite o prato (cardápio vazio neste dia)" value="${esc(cur.dishText)}">`) : '';
-  const sizeChips = cur.kind === 'marmitex' ? `<div class="h3">Tamanho</div><div class="seg c3">${sizes.map((z) => {
+    : `<input class="inp" data-input="dishText" placeholder="Digite o prato (cardápio vazio neste dia)" value="${esc(cur.dishText)}">`);
+  const sizeChips = `<div class="h3">Tamanho</div><div class="seg c3">${sizes.map((z) => {
     const p = isFei ? s.prices.feijoada[cur.modo][z] : s.prices.marmitex[z];
     return `<button class="chip ${(cur.size === z || (isFei && cur.size === 'P' && z === 'M')) ? 'on' : ''}" data-action="size" data-v="${z}">${SIZES[z]}<span class="sub">${money(p)}</span></button>`;
-  }).join('')}</div>` : '';
+  }).join('')}</div>`;
   const modo = isFei ? `<div class="h3">Feijoada</div><div class="seg c2">${Object.entries(MODOS).map(([k, l]) =>
     `<button class="chip ${cur.modo === k ? 'on' : ''}" data-action="modo" data-v="${k}">${l}<span class="sub">${money(s.prices.feijoada[k][item.size])}</span></button>`).join('')}</div>` : '';
   const acomp = `<div class="h3">Acompanhamentos</div><div class="chips">${menu.acomp.length ? menu.acomp.map((a) => {
@@ -107,8 +109,9 @@ function formView({ store, s, ui, toast }) {
 
   return {
     kicker: 'NOVO PEDIDO', title: 'Marmitex & pratos', back: true,
-    body: `<div class="card"><div class="h2">1 · Monte o item</div><div class="muted mb8">Cardápio do dia:</div>${days}${kinds}
-      ${needsDish(cur) ? `<div class="h3">Prato principal</div>${dishes}` : ''}${sizeChips}${modo}${acomp}
+    body: `<div class="note blue mb12">Prato feito e prato feijoada são só no restaurante: lance na comanda (Balança &gt; Pratos).</div>
+      <div class="card"><div class="h2">1 · Monte o item</div><div class="muted mb8">Cardápio do dia:</div>${days}
+      <div class="h3">Prato principal</div>${dishes}${sizeChips}${modo}${acomp}
       <div class="preview"><span>${priceErr ? esc(priceErr) : esc(itemLabel(item))}</span><b>${price !== null ? money(price) : '—'}</b></div>
       <button class="btn block gold" data-action="addItem">${icons.plus} Adicionar ao pedido</button></div>
       <div class="card"><div class="h2">2 · Itens do pedido (${d.itens.length})</div>${added || '<div class="muted">Nenhum item ainda. Cada item recebe um número M-xxx para a tampa.</div>'}
@@ -149,8 +152,8 @@ export default {
       }
     },
     closeMids({ ui }) { ui.modal = null; },
+    salaoReady({ store, toast }, el) { const r = store.setSalaoReady(Number(el.dataset.n), el.dataset.l, true); if (!r.ok) toast(r.error, 'err'); },
     day({ ui }, el) { ui.draft.day = el.dataset.v; ui.draft.cur = { ...freshCur(), kind: ui.draft.cur.kind }; },
-    kind({ ui }, el) { ui.draft.cur = { ...freshCur(), kind: el.dataset.v, acomp: ui.draft.cur.acomp }; },
     dish({ ui }, el) { ui.draft.cur.dish = ui.draft.cur.dish === el.dataset.v ? '' : el.dataset.v; },
     size({ ui }, el) { ui.draft.cur.size = el.dataset.v; },
     modo({ ui }, el) { ui.draft.cur.modo = el.dataset.v; },
@@ -161,7 +164,7 @@ export default {
     addItem({ ui, s, toast }) {
       const d = ui.draft;
       const it = buildItem(d.cur, s.menu[d.day]);
-      if (needsDish(d.cur) && !it.dish) { toast('Escolha o prato principal', 'err'); return false; }
+      if (!it.dish) { toast('Escolha o prato principal', 'err'); return false; }
       try { itemPrice(s.prices, it); } catch (e) { toast(e.message, 'err'); return false; }
       d.itens.push(it);
       d.cur = { ...freshCur(), kind: d.cur.kind };

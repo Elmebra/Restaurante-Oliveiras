@@ -1,7 +1,7 @@
 // Balança manual: o operador digita QUALQUER peso, escolhe o cartão (1–30) e lança.
 import { icons } from '../icons.js';
 import { money, parseDecimal, fmtKg, esc, timeHM } from '../util.js';
-import { pesagemCents } from '../pricing.js';
+import { pesagemCents, itemPrice } from '../pricing.js';
 import { CARD_COUNT } from '../store.js';
 
 function weightKg(ui) {
@@ -10,8 +10,41 @@ function weightKg(ui) {
   return ui.unit === 'g' ? n / 1000 : n;
 }
 
+const DISHES = [
+  ['feito', 'Prato Feito', 'Só no restaurante'],
+  ['feijoada', 'Prato Feijoada', 'Só no restaurante'],
+  ['sepM', 'Feijoada separada · Média', 'Restaurante'],
+  ['sepG', 'Feijoada separada · Grande', 'Restaurante'],
+];
+
+function pratosView({ s, ui, store }) {
+  ui.dishes = ui.dishes || {};
+  const price = (k) => itemPrice(s.prices, store.salaoItem(k));
+  const total = DISHES.reduce((t, [k]) => t + (ui.dishes[k] || 0) * price(k), 0);
+  const count = DISHES.reduce((t, [k]) => t + (ui.dishes[k] || 0), 0);
+  const cells = [];
+  for (let n = 1; n <= CARD_COUNT; n += 1) {
+    cells.push(`<button class="cardnum ${s.cards[n] ? 'used' : ''} ${ui.card === n ? 'sel' : ''}" data-action="pickCard" data-v="${n}" aria-label="Cartão ${n}">${n}</button>`);
+  }
+  return {
+    kicker: 'MODO BALANÇA', title: 'Comanda · pratos', back: true,
+    body: `${tabs(ui)}
+      <div class="note blue mb12">Tudo que é servido no restaurante vai numa comanda (cartão). A cozinha recebe o aviso na hora.</div>
+      <div class="card">${DISHES.map(([k, l, sub]) => `<div class="pricerow"><div class="lbl"><b>${l}</b><span class="hint">${sub} · ${money(price(k))}</span></div>
+        <div class="stepper"><button data-action="dDec" data-v="${k}" aria-label="Menos">−</button><span class="q">${ui.dishes[k] || 0}</span><button data-action="dInc" data-v="${k}" aria-label="Mais">+</button></div></div>`).join('')}</div>
+      <div class="sec" style="margin-top:4px">Cartão do cliente</div><div class="cards">${cells.join('')}</div>`,
+    footer: `<button class="btn block ${count && ui.card ? '' : 'off'}" data-action="launchDishes">${icons.check} Lançar${ui.card ? ` no cartão ${ui.card}` : ''}${count ? ` · ${money(total)}` : ''}</button>`,
+  };
+}
+
+const tabs = (ui) => `<div class="tabs"><button class="${ui.mode !== 'pratos' ? 'on' : ''}" data-action="mode" data-v="peso">Pesar prato</button><button class="${ui.mode === 'pratos' ? 'on' : ''}" data-action="mode" data-v="pratos">Pratos / feijoada</button></div>`;
+
 export default {
-  render({ s, ui, store }) {
+  render(ctx) {
+    if (ctx.ui.mode === 'pratos') return pratosView(ctx);
+    return this.pesar(ctx);
+  },
+  pesar({ s, ui, store }) {
     ui.unit = ui.unit || 'kg';
     ui.peso = ui.peso ?? '';
     const kg = weightKg(ui);
@@ -30,7 +63,7 @@ export default {
     const prevTotal = sel ? store.cardTotal(sel) : 0;
     return {
       kicker: 'MODO BALANÇA', title: 'Pesagem do prato', back: true,
-      body: `${last}
+      body: `${tabs(ui)}${last}
         <div class="card scale">
           <div class="lbl-caps">PESO DO PRATO</div>
           <div class="peso-row">
@@ -52,6 +85,18 @@ export default {
     };
   },
   actions: {
+    mode({ ui }, el) { ui.mode = el.dataset.v; },
+    dInc({ ui }, el) { ui.dishes = ui.dishes || {}; ui.dishes[el.dataset.v] = (ui.dishes[el.dataset.v] || 0) + 1; },
+    dDec({ ui }, el) { ui.dishes = ui.dishes || {}; ui.dishes[el.dataset.v] = Math.max(0, (ui.dishes[el.dataset.v] || 0) - 1); },
+    launchDishes({ store, ui, toast }) {
+      const items = Object.entries(ui.dishes || {}).map(([key, qty]) => ({ key, qty }));
+      if (!items.some((i) => i.qty > 0)) { toast('Escolha o prato', 'err'); return false; }
+      if (!ui.card) { toast('Escolha o número do cartão', 'err'); return false; }
+      const r = store.addCardDishes(ui.card, items);
+      if (!r.ok) { toast(r.error, 'err'); return false; }
+      toast(`Cartão ${ui.card}: enviado para a cozinha`, 'ok');
+      ui.dishes = {}; ui.card = null;
+    },
     pickCard({ ui }, el) { ui.card = Number(el.dataset.v) === ui.card ? null : Number(el.dataset.v); },
     unit({ ui }, el) { ui.unit = el.dataset.v; },
     useGrams({ ui }) { ui.unit = 'g'; },

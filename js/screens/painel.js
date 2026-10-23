@@ -1,6 +1,6 @@
 // Painel do Dono: resumo financeiro, cardápio editável, preços, produtos e configurações.
 import { icons } from '../icons.js';
-import { money, esc, centsToInput, parseMoney, WEEK_ORDER, DAY_NAMES, DAY_SHORT } from '../util.js';
+import { money, esc, centsToInput, parseMoney, timeHM, WEEK_ORDER, DAY_NAMES, DAY_SHORT } from '../util.js';
 import { CATS, PAGAMENTOS } from '../store.js';
 import { SIZES } from '../pricing.js';
 import { loadDemo } from '../demo.js';
@@ -78,8 +78,25 @@ function produtos({ s, ui }) {
       <button class="btn block" data-action="prodAdd">${icons.plus} Adicionar produto</button></div>`;
 }
 
-function config() {
-  return `<div class="card"><div class="h2">Backup</div><div class="muted mb12">Os dados ficam neste aparelho. Faça backup com frequência e leve-o a outro aparelho se precisar.</div>
+function syncCard({ sync, ui }) {
+  if (sync.configured) {
+    const st = sync.status;
+    const label = { ok: 'Sincronizado', pending: 'Aguardando', offline: 'Sem internet', error: 'Erro' }[st.state] || '';
+    return `<div class="card gold"><div class="h2">Sincronização (Google Sheets)</div>
+      <div class="note ${st.state === 'ok' ? 'ok' : st.state === 'error' ? 'err' : ''} mb12">${label}${st.last ? ` · última às ${timeHM(st.last)}` : ''}${st.pending ? ` · ${st.pending} alteração(ões) a enviar` : ''}${st.error ? `<br>${esc(st.error)}` : ''}</div>
+      <div class="muted mb12">Conectado a: ${esc(sync.url.slice(0, 48))}…</div>
+      <button class="btn block mb8" data-action="syncNow">Sincronizar agora</button>
+      <button class="btn block ghost" data-action="syncOff">Desconectar este aparelho</button></div>`;
+  }
+  return `<div class="card gold"><div class="h2">Sincronização (Google Sheets)</div>
+    <div class="muted mb12">Liga balança, cozinha, expedição, caixa e painel em tempo quase real. Veja o passo a passo no LEIA-ME.</div>
+    <label class="field"><span class="lbl">Endereço do Apps Script (termina em /exec)</span><input class="inp" data-input="syncUrl" autocomplete="off" autocapitalize="off" value="${esc(ui.syncUrl || '')}"></label>
+    <label class="field"><span class="lbl">Senha</span><input class="inp" data-input="syncToken" autocomplete="off" autocapitalize="off" value="${esc(ui.syncToken || '')}"></label>
+    <button class="btn block" data-action="syncOn">Conectar e sincronizar</button></div>`;
+}
+
+function config(ctx) {
+  return `${syncCard(ctx)}<div class="card"><div class="h2">Backup</div><div class="muted mb12">Os dados ficam neste aparelho. Faça backup com frequência e leve-o a outro aparelho se precisar.</div>
       <button class="btn block ghost mb8" data-action="exportJson">${icons.download} Baixar backup (.json)</button>
       <div class="btn block ghost file-btn mb8">${icons.upload} Restaurar backup<input type="file" accept=".json,application/json" data-change="importJson"></div>
       <button class="btn block ghost" data-action="exportCsv">${icons.download} Baixar vendas (.csv para Excel)</button></div>
@@ -137,6 +154,20 @@ export default {
     },
     exportJson({ store, toast }) { download(`oliveiras-backup-${new Date().toISOString().slice(0, 10)}.json`, store.exportJSON(), 'application/json'); toast('Backup baixado', 'ok'); return false; },
     exportCsv({ store, toast }) { download(`oliveiras-vendas-${new Date().toISOString().slice(0, 10)}.csv`, store.ledgerCSV(), 'text/csv;charset=utf-8'); toast('Planilha baixada', 'ok'); return false; },
+    syncOn({ sync, ui, toast }) {
+      const r = sync.setConfig(ui.syncUrl, ui.syncToken);
+      if (!r.ok) { toast(r.error, 'err'); return false; }
+      toast('Conectando…');
+      sync.syncNow().then((x) => { toast(x.ok ? 'Sincronizado!' : x.error, x.ok ? 'ok' : 'err'); window.dispatchEvent(new Event('hashchange')); });
+    },
+    syncNow({ sync, toast }) {
+      toast('Sincronizando…');
+      sync.syncNow().then((x) => { toast(x.ok ? 'Sincronizado!' : x.error, x.ok ? 'ok' : 'err'); window.dispatchEvent(new Event('hashchange')); });
+      return false;
+    },
+    async syncOff({ sync, ask, toast }) {
+      if (await ask({ title: 'Desconectar?', text: 'Este aparelho deixa de enviar e receber. Os dados dele e da planilha continuam.', ok: 'Desconectar', danger: true })) { sync.clear(); toast('Desconectado'); }
+    },
     async demo({ store, ask, toast }) {
       if (await ask({ title: 'Carregar demonstração?', text: 'Adiciona vendas, pedidos e motoboys de exemplo. Use "Apagar vendas e pedidos" depois.', ok: 'Carregar' })) {
         loadDemo(store); toast('Dados de demonstração carregados', 'ok');
@@ -151,6 +182,8 @@ export default {
   inputs: {
     add_dishes({ ui }, el) { ui.add_dishes = el.value; return false; },
     add_acomp({ ui }, el) { ui.add_acomp = el.value; return false; },
+    syncUrl({ ui }, el) { ui.syncUrl = el.value; return false; },
+    syncToken({ ui }, el) { ui.syncToken = el.value; return false; },
     npName({ ui }, el) { ui.np.name = el.value; return false; },
     npPrice({ ui }, el) { ui.np.price = el.value; return false; },
   },

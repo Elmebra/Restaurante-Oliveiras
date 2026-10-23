@@ -175,25 +175,24 @@ test('pedido com vários marmitex: um M-xxx para cada, preços e total corretos'
       { kind: 'marmitex', size: 'G', dish: 'Bife acebolado', acomp: ['Batata frita'] },
       { kind: 'marmitex', size: 'P', dish: 'Picadinho', acomp: ['Couve', 'Farofa'] },
       { kind: 'feijoada', modo: 'individual', size: 'M', dish: 'Feijoada', acomp: [] },
-      { kind: 'prato', tipo: 'feito', dish: 'Virado', acomp: [] },
-      { kind: 'prato', tipo: 'feijoada', acomp: [] },
+      { kind: 'feijoada', modo: 'separada', size: 'G', dish: 'Feijoada', acomp: [] },
     ],
     bebidas: [{ productId: 'refri_lata', qty: 2 }],
   }));
   assert.ok(r.ok, r.error);
   const p = r.pedido;
-  assert.deepEqual(p.itens.map((i) => i.mid), ['M-001', 'M-002', 'M-003', 'M-004', 'M-005']);
-  assert.deepEqual(p.itens.map((i) => i.price), [2200, 1700, 2200, 2000, 2300]);
-  assert.equal(p.subtotal, 2200 + 1700 + 2200 + 2000 + 2300 + 1200);
+  assert.deepEqual(p.itens.map((i) => i.mid), ['M-001', 'M-002', 'M-003', 'M-004']);
+  assert.deepEqual(p.itens.map((i) => i.price), [2200, 1700, 2200, 7000]);
+  assert.equal(p.subtotal, 2200 + 1700 + 2200 + 7000 + 1200);
   assert.equal(s.pedidoTotal(p), p.subtotal + 400);
   assert.equal(p.num, 1);
 
   const sm = s.summary('hoje');
-  assert.equal(sm.byCat.marmitex, 2200 + 1700 + 2200);
-  assert.equal(sm.byCat.pratos, 4300);
+  assert.equal(sm.byCat.marmitex, 2200 + 1700 + 2200 + 7000);
+  assert.equal(sm.byCat.pratos, 0);
   assert.equal(sm.byCat.bebidas, 1200);
   assert.equal(sm.taxas, 400);
-  assert.equal(sm.total, 2200 + 1700 + 2200 + 4300 + 1200); // taxa não entra no faturamento por categoria
+  assert.equal(sm.total, 2200 + 1700 + 2200 + 7000 + 1200); // taxa não entra no faturamento por categoria
 });
 
 test('feijoada separada custa 60 (média) e 70 (grande)', () => {
@@ -477,4 +476,56 @@ test('assinantes são avisados a cada mudança', () => {
   off();
   s.setPrice('kg', 5100);
   assert.equal(n, 2);
+});
+
+
+test('prato feito e prato feijoada são só no restaurante: recusados em pedido de entrega/retirada', () => {
+  const s = mk();
+  for (const tipo of ['entrega', 'retirada']) {
+    const r = s.createPedido(baseDraft({ tipo, endereco: 'Centro', itens: [{ kind: 'prato', tipo: 'feito', dish: 'Virado', acomp: [] }] }));
+    assert.equal(r.ok, false);
+    assert.match(r.error, /restaurante/);
+  }
+  assert.equal(s.state.pedidos.length, 0);
+});
+
+test('feijoada separada pode ir para entrega (motoboy) e também para a comanda do restaurante', () => {
+  const s = mk();
+  const e = s.createPedido(baseDraft({ tipo: 'entrega', endereco: 'Centro', itens: [{ kind: 'feijoada', modo: 'separada', size: 'M', dish: 'Feijoada', acomp: [] }] }));
+  assert.ok(e.ok, e.error);
+  assert.equal(e.pedido.subtotal, 6000);
+  const c = s.addCardDishes(9, [{ key: 'sepG', qty: 1 }]);
+  assert.ok(c.ok, c.error);
+  assert.equal(c.total, 7000);
+});
+
+test('comanda: pratos do restaurante abrem o cartão, vão para a cozinha e fecham no caixa', () => {
+  const s = mk();
+  const r = s.addCardDishes(4, [{ key: 'feito', qty: 2 }, { key: 'feijoada', qty: 1 }]);
+  assert.ok(r.ok, r.error);
+  assert.equal(r.total, 2 * 2000 + 2300);
+  assert.equal(s.filaSalao().length, 3 - 1); // 2 linhas (feito x2, feijoada x1)
+  assert.deepEqual(s.filaSalao().map((x) => x.num), [4, 4]);
+  s.launchWeighing(4, '0,5'); // mesmo cartão: pesagem + pratos + bebida
+  s.addCardItems(4, [{ productId: 'refri_lata', qty: 1 }]);
+  assert.ok(s.setSalaoReady(4, s.filaSalao()[0].line.id, true).ok);
+  assert.equal(s.filaSalao().length, 1);
+  const total = 4000 + 2300 + 2250 + 600;
+  assert.equal(s.cardTotal(s.state.cards[4]), total);
+  const f = s.closeCard(4, 'pix');
+  assert.equal(f.total, total);
+  const sm = s.summary('hoje');
+  assert.equal(sm.byCat.pratos, 6300);
+  assert.equal(sm.byCat.pesagem, 2250);
+  assert.equal(sm.byCat.bebidas, 600);
+  assert.equal(sm.total, total);
+  assert.equal(s.state.cards[4], undefined);
+});
+
+test('comanda: validações', () => {
+  const s = mk();
+  assert.equal(s.addCardDishes(31, [{ key: 'feito', qty: 1 }]).ok, false);
+  assert.equal(s.addCardDishes(3, [{ key: 'xxx', qty: 1 }]).ok, false);
+  assert.equal(s.addCardDishes(3, [{ key: 'feito', qty: 0 }]).ok, false);
+  assert.equal(s.state.cards[3], undefined);
 });

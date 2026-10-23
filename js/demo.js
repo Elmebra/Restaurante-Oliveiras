@@ -14,7 +14,8 @@ export function loadDemo(store) {
     const mk = (extra) => store.createPedido({ tipo: 'entrega', endereco: 'Centro', pagamento: 'dinheiro', ...extra });
     const a = mk({ cliente: 'Dona Lúcia', itens: [{ kind: 'marmitex', size: 'G', dish: 'Virado', acomp: ['Couve', 'Farofa'] }, { kind: 'marmitex', size: 'M', dish: 'Picadinho', acomp: [] }] });
     const b = mk({ cliente: 'Sr. Paulo', itens: [{ kind: 'feijoada', modo: 'separada', size: 'G', dish: 'Feijoada', acomp: [] }], pagamento: 'pix' });
-    mk({ cliente: 'Ana', tipo: 'retirada', itens: [{ kind: 'prato', tipo: 'feijoada', dish: '', acomp: [] }] });
+    mk({ cliente: 'Ana', tipo: 'retirada', itens: [{ kind: 'feijoada', modo: 'separada', size: 'M', dish: 'Feijoada', acomp: [] }] });
+    store.addCardDishes(5, [{ key: 'feito', qty: 1 }, { key: 'feijoada', qty: 1 }]);
     for (const p of [a, b]) {
       for (const it of p.pedido.itens) store.setItemReady(p.pedido.id, it.id, true);
     }

@@ -1,5 +1,6 @@
 // Casco do app: rota, renderização, eventos e utilitários de interface (toast, confirmação).
 import { createStore } from './store.js';
+import { createSync } from './sync.js';
 import { icons } from './icons.js';
 import { esc } from './util.js';
 import home from './screens/home.js';
@@ -10,6 +11,15 @@ import caixa from './screens/caixa.js';
 import painel from './screens/painel.js';
 
 const store = createStore();
+const sync = createSync({
+  store,
+  onChange: ({ applied }) => {
+    const a = document.activeElement;
+    const busy = (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) || document.querySelector('.sheet');
+    if (applied && !busy) rerender({ keepFocus: false });
+    else updateDot();
+  },
+});
 const SCREENS = { balanca, cozinha, expedicao, caixa, painel };
 const NAV = [
   ['balanca', 'Balança', 'scale'],
@@ -58,7 +68,7 @@ function back() { history.length > 1 ? history.back() : go(''); }
 
 function ctxFor(name, params) {
   const ui = uiState[name] || (uiState[name] = {});
-  return { store, s: store.state, params, ui, go, back, toast, ask, rerender, name };
+  return { store, sync, s: store.state, params, ui, uiOf: (n) => uiState[n] || (uiState[n] = {}), go, back, toast, ask, rerender, name };
 }
 
 function navHTML(active, badges) {
@@ -67,9 +77,22 @@ function navHTML(active, badges) {
       badges[k] ? `<b class="nbadge">${badges[k]}</b>` : ''}</a>`).join('')}</nav>`;
 }
 
+const DOT = { ok: ['#4e9a5f', 'Sincronizado'], pending: ['#c79a3d', 'Sincronizando…'], offline: ['#c79a3d', 'Sem internet — salvo neste aparelho'], error: ['#d9776d', 'Erro na sincronização'] };
+function dotHTML() {
+  if (!sync.configured) return '';
+  const st = sync.status;
+  const [color, label] = DOT[st.state] || DOT.pending;
+  const extra = st.pending ? ` (${st.pending} pendente${st.pending > 1 ? 's' : ''})` : '';
+  return `<span class="syncdot" id="syncdot" title="${esc(label + extra)}" aria-label="${esc(label + extra)}" style="background:${color}"></span>`;
+}
+function updateDot() {
+  const el = document.getElementById('syncdot');
+  if (el) el.outerHTML = dotHTML();
+}
+
 function badges() {
   const s = store;
-  const cozinha = s.filaCozinha().length;
+  const cozinha = s.filaCozinha().length + s.filaSalao().length;
   const exp = s.pedidosAbertos().filter((p) => p.itens.every((i) => i.status === 'pronto')).length;
   const caixa = Object.keys(s.state.cards).length;
   return { cozinha, expedicao: exp, caixa };
@@ -84,7 +107,7 @@ function render() {
   if (name === '') { $app.innerHTML = view.body; return; }
   const left = view.back ? `<button class="hbtn" data-action="__back" aria-label="Voltar">${icons.back}</button>` : '';
   $app.innerHTML = `
-    <header class="hdr">${left}<div class="hdr-t"><div class="kicker">${esc(view.kicker || '')}</div><h1>${esc(view.title || '')}</h1></div>${view.right || ''}</header>
+    <header class="hdr">${left}<div class="hdr-t"><div class="kicker">${esc(view.kicker || '')}</div><h1>${esc(view.title || '')}</h1></div>${dotHTML()}${view.right || ''}</header>
     <main id="main">${view.body}</main>
     ${view.footer ? `<div class="footer-bar">${view.footer}</div>` : ''}
     ${navHTML(name, badges())}
@@ -182,5 +205,6 @@ setInterval(() => {
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 }
-window.__oliveiras = { store }; // facilita testes e suporte
+sync.start();
+window.__oliveiras = { store, sync }; // facilita testes e suporte
 render();

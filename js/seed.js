@@ -82,5 +82,9 @@ export function makeSeed() {
     pedidos: [],
     ledger: [],
     seq: { day: '', m: 0, pedido: 0 },
+    tomb: {},
+    meta: {},
+    sync: { rev: 0, pushedAt: 0 },
+    dev: '',
   };
 }
