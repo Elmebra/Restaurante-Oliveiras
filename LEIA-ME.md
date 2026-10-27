@@ -20,6 +20,14 @@ Se alterar o Code.gs depois: Implantar > Gerenciar implantações > lápis > Ver
 
 Regras: cada aparelho guarda tudo localmente e funciona sem internet; quando volta, envia o que mudou e recebe o dos outros (a alteração mais recente vence).
 
+## Impressão (Bematech MP-4200 TH, USB)
+1. Ligue a impressora no PC/notebook (cabo USB na porta quadrada) e instale o driver da Bematech (site da Bematech > MP-4200 TH). Deixe-a como **impressora padrão** do Windows, papel 80 mm.
+2. Crie um atalho do Chrome com este destino (ajuste o endereço do seu site):
+   `"C:\Program Files\Google\Chrome\Application\chrome.exe" --kiosk-printing --app=https://SEU-USUARIO.github.io/oliveiras/#/cozinha`
+   O `--kiosk-printing` faz imprimir direto, sem a janela de confirmação.
+3. No app: Painel > Dados > Impressão: ligue "Imprimir sozinho pedidos novos", escolha 80 mm e 1 ou 2 vias, e toque em "Imprimir cupom de teste".
+4. Só o aparelho com a impressão automática ligada imprime sozinho. Em qualquer aparelho existe o botão "Imprimir" no pedido.
+
 ## Testes
 `node --test tests/*.test.js` (regras de negócio + sincronização com vários aparelhos simulados).
 Local: `python3 -m http.server 8080` e abra http://localhost:8080.

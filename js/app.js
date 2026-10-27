@@ -1,6 +1,7 @@
 // Casco do app: rota, renderização, eventos e utilitários de interface (toast, confirmação).
 import { createStore } from './store.js';
 import { createSync } from './sync.js';
+import { createPrinter } from './print.js';
 import { icons } from './icons.js';
 import { esc } from './util.js';
 import home from './screens/home.js';
@@ -11,6 +12,7 @@ import caixa from './screens/caixa.js';
 import painel from './screens/painel.js';
 
 const store = createStore();
+const printer = createPrinter({ store });
 const sync = createSync({
   store,
   onChange: ({ applied }) => {
@@ -68,7 +70,7 @@ function back() { history.length > 1 ? history.back() : go(''); }
 
 function ctxFor(name, params) {
   const ui = uiState[name] || (uiState[name] = {});
-  return { store, sync, s: store.state, params, ui, uiOf: (n) => uiState[n] || (uiState[n] = {}), go, back, toast, ask, rerender, name };
+  return { store, sync, printer, s: store.state, params, ui, uiOf: (n) => uiState[n] || (uiState[n] = {}), go, back, toast, ask, rerender, name };
 }
 
 function navHTML(active, badges) {
@@ -206,5 +208,6 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 }
 sync.start();
-window.__oliveiras = { store, sync }; // facilita testes e suporte
+printer.start();
+window.__oliveiras = { store, sync, printer }; // facilita testes e suporte
 render();

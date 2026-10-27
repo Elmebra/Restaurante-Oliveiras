@@ -37,6 +37,7 @@ function pedidoCard(p, ctx) {
     actions = `<div class="note ok mt8">${p.status === 'entregue' ? `Entregue por ${esc(p.motoboyNome)} às ${timeHM(p.entregueAt)}` : `Retirado às ${timeHM(p.entregueAt)}`}</div>
       <div class="mt8"><button class="btn xs ghost" data-action="undoDone" data-p="${p.id}">${icons.undo} Desfazer</button></div>`;
   }
+  actions += `<div class="mt8"><button class="btn xs ghost" data-action="printPedido" data-p="${p.id}">Imprimir</button></div>`;
   return `<div class="card ${p.status === 'entregue' || p.status === 'retirado' ? 'dim' : ''}">${head}${mids}${tel}${actions}</div>`;
 }
 
@@ -65,6 +66,7 @@ export default {
     };
   },
   actions: {
+    printPedido({ printer, toast }, el) { toast(printer.printPedido(el.dataset.p) ? 'Enviado para a impressora' : 'Pedido não encontrado', 'ok'); return false; },
     tab({ ui }, el) { ui.tab = el.dataset.v; ui.pick = null; },
     openPick({ ui, store, toast }, el) {
       const p = store.state.pedidos.find((x) => x.id === el.dataset.p);

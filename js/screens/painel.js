@@ -95,8 +95,19 @@ function syncCard({ sync, ui }) {
     <button class="btn block" data-action="syncOn">Conectar e sincronizar</button></div>`;
 }
 
+function printCard({ printer }) {
+  const c = printer.config;
+  const seg = (name, val, opts) => `<div class="seg c${opts.length} row1 mb8">${opts.map(([v, l]) => `<button class="chip ${val === v ? 'on' : ''}" data-action="${name}" data-v="${v}">${l}</button>`).join('')}</div>`;
+  return `<div class="card"><div class="h2">Impressão (cupom térmico)</div>
+    <div class="muted mb12">Impressora térmica de 80 mm (ex.: Bematech MP-4200 TH). Ligue a impressão automática no aparelho que fica perto da impressora.</div>
+    <div class="h3" style="margin-top:0">Imprimir sozinho pedidos novos</div>${seg('printAuto', c.auto ? 'on' : 'off', [['on', 'Ligado'], ['off', 'Desligado']])}
+    <div class="h3">Largura do papel</div>${seg('printWidth', c.width, [[80, '80 mm'], [58, '58 mm']])}
+    <div class="h3">Vias por pedido</div>${seg('printCopies', c.copies, [[1, '1 via'], [2, '2 vias (cozinha + entrega)']])}
+    <button class="btn block ghost" data-action="printTest">Imprimir cupom de teste</button></div>`;
+}
+
 function config(ctx) {
-  return `${syncCard(ctx)}<div class="card"><div class="h2">Backup</div><div class="muted mb12">Os dados ficam neste aparelho. Faça backup com frequência e leve-o a outro aparelho se precisar.</div>
+  return `${syncCard(ctx)}${printCard(ctx)}<div class="card"><div class="h2">Backup</div><div class="muted mb12">Os dados ficam neste aparelho. Faça backup com frequência e leve-o a outro aparelho se precisar.</div>
       <button class="btn block ghost mb8" data-action="exportJson">${icons.download} Baixar backup (.json)</button>
       <div class="btn block ghost file-btn mb8">${icons.upload} Restaurar backup<input type="file" accept=".json,application/json" data-change="importJson"></div>
       <button class="btn block ghost" data-action="exportCsv">${icons.download} Baixar vendas (.csv para Excel)</button></div>
@@ -168,6 +179,10 @@ export default {
     async syncOff({ sync, ask, toast }) {
       if (await ask({ title: 'Desconectar?', text: 'Este aparelho deixa de enviar e receber. Os dados dele e da planilha continuam.', ok: 'Desconectar', danger: true })) { sync.clear(); toast('Desconectado'); }
     },
+    printAuto({ printer }, el) { printer.set({ auto: el.dataset.v === 'on' }); },
+    printWidth({ printer }, el) { printer.set({ width: Number(el.dataset.v) }); },
+    printCopies({ printer }, el) { printer.set({ copies: Number(el.dataset.v) }); },
+    printTest({ printer, toast }) { printer.printTest(); toast('Enviado para a impressora'); return false; },
     async demo({ store, ask, toast }) {
       if (await ask({ title: 'Carregar demonstração?', text: 'Adiciona vendas, pedidos e motoboys de exemplo. Use "Apagar vendas e pedidos" depois.', ok: 'Carregar' })) {
         loadDemo(store); toast('Dados de demonstração carregados', 'ok');

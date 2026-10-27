@@ -49,7 +49,7 @@ function queueView({ store, s, ui }) {
         <div class="grow"><div class="lab">${esc(i.label)}</div>${i.acomp.length ? `<div class="sub">+ ${esc(i.acomp.join(', '))}</div>` : ''}</div>
         <button class="btn xs ${i.status === 'pronto' ? 'ghost' : ''}" data-action="ready" data-p="${p.id}" data-i="${i.id}" data-v="${i.status === 'pronto' ? 0 : 1}">${i.status === 'pronto' ? 'Desfazer' : `${''}Pronto`}</button></div>`).join('')}
       ${p.bebidas.length ? `<div class="muted mt8">Bebidas: ${esc(p.bebidas.map((b) => `${b.qty}x ${b.name}`).join(', '))}</div>` : ''}
-      <div class="mt8"><button class="btn xs danger" data-action="cancel" data-p="${p.id}">Cancelar pedido</button></div></div>`;
+      <div class="row mt8"><button class="btn xs ghost" data-action="printPedido" data-p="${p.id}">Imprimir</button><button class="btn xs danger" data-action="cancel" data-p="${p.id}">Cancelar pedido</button></div></div>`;
   }).join('');
   return {
     kicker: 'MODO COZINHA', title: 'Fila de montagem', back: true,
@@ -65,7 +65,8 @@ function midsModal(p) {
   return `<div class="grab"></div><h3>Pedido #${p.num} lançado</h3>
     <div class="muted">Escreva a caneta na tampa de cada marmitex:</div>
     <div class="bigmid">${p.itens.map((i) => `<div><span class="mid big">${i.mid}</span><div class="what">${esc(i.label)}</div></div>`).join('')}</div>
-    <button class="btn block mt12" data-action="closeMids">${icons.check} Entendi</button>`;
+    <button class="btn block ghost mt12" data-action="printPedido" data-p="${p.id}">Imprimir cupom</button>
+    <button class="btn block mt8" data-action="closeMids">${icons.check} Entendi</button>`;
 }
 
 function formView({ store, s, ui, toast }) {
@@ -152,6 +153,7 @@ export default {
       }
     },
     closeMids({ ui }) { ui.modal = null; },
+    printPedido({ printer, toast }, el) { toast(printer.printPedido(el.dataset.p) ? 'Enviado para a impressora' : 'Pedido não encontrado', 'ok'); return false; },
     salaoReady({ store, toast }, el) { const r = store.setSalaoReady(Number(el.dataset.n), el.dataset.l, true); if (!r.ok) toast(r.error, 'err'); },
     day({ ui }, el) { ui.draft.day = el.dataset.v; ui.draft.cur = { ...freshCur(), kind: ui.draft.cur.kind }; },
     dish({ ui }, el) { ui.draft.cur.dish = ui.draft.cur.dish === el.dataset.v ? '' : el.dataset.v; },

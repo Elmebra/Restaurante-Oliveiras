@@ -1,8 +1,8 @@
 // Service worker: o app abre sem internet (cache do "casco") e as fontes ficam em cache após o 1º uso.
-const VERSION = 'oliveiras-v3';
+const VERSION = 'oliveiras-v4';
 const SHELL = [
   './', './index.html', './manifest.webmanifest', './css/app.css',
-  './js/app.js', './js/util.js', './js/pricing.js', './js/seed.js', './js/store.js', './js/icons.js', './js/sync.js', './js/demo.js',
+  './js/app.js', './js/util.js', './js/pricing.js', './js/seed.js', './js/store.js', './js/icons.js', './js/sync.js', './js/ticket.js', './js/print.js', './js/demo.js',
   './js/screens/home.js', './js/screens/balanca.js', './js/screens/cozinha.js',
   './js/screens/expedicao.js', './js/screens/caixa.js', './js/screens/painel.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png', './icons/apple-touch-icon.png',
